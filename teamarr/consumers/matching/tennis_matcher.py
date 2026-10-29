@@ -113,6 +113,27 @@ _GENERIC_TOURNAMENT_TOKENS = frozenset(
     }
 )
 
+# Venue words that name a court or a ground, not a city ("Center Court" must never name the
+# tournament whose venue is "National Tennis Center") — used with the venue city (#1178).
+_GENERIC_VENUE_TOKENS = frozenset(
+    {
+        "court",
+        "centre",
+        "center",
+        "stadium",
+        "arena",
+        "national",
+        "park",
+        "club",
+        "hall",
+        "grounds",
+        "complex",
+        "indoor",
+        "indoors",
+        "sports",
+    }
+)
+
 # Draw hints a feed stream can declare ("Ladies' Singles Semifinals").
 # normalize_text strips apostrophes, so match the flattened token forms.
 _DRAW_GENDER_HINTS = [
@@ -155,6 +176,16 @@ def _tournament_key(event: Event) -> str:
     return event.tournament_id or event.tournament_name or ""
 
 
+def _venue_city(event: Event) -> str:
+    """The city an event is played in: Venue.city, else the venue name up to its first comma
+    ("Vienna, Austria" -> "Vienna"). ESPN puts the tournament's city there, while many
+    tournament names carry only a sponsor ("Erste Bank Open")."""
+    venue = event.venue
+    if venue is None:
+        return ""
+    return venue.city or (venue.name or "").split(",")[0]
+
+
 def _named_tournaments(text: str, pool: list[Event]) -> set[str]:
     """Tournament keys the (normalized) stream text names, out of the pool.
 
@@ -163,6 +194,9 @@ def _named_tournaments(text: str, pool: list[Event]) -> set[str]:
     open/cup/masters excluded) appears in the stream text, or when its full
     normalized name appears as a phrase. No alias table — ESPN's own
     tournament names are the vocabulary.
+
+    The venue city counts too (#1178): "ATP 500 Tennis: Vienna - Day #4" names the Erste Bank
+    Open, whose name has no city in it.
 
     A distinctive token must be at least three characters (#689): "US Open"
     reduces to the lone token "us", which every "US:"-prefixed stream carries,
@@ -182,6 +216,13 @@ def _named_tournaments(text: str, pool: list[Event]) -> set[str]:
         tnorm = normalize_text(tname)
         distinctive = {
             tok for tok in tnorm.split() if tok not in _GENERIC_TOURNAMENT_TOKENS and len(tok) >= 3
+        }
+        distinctive |= {
+            tok
+            for tok in normalize_text(_venue_city(event)).split()
+            if tok not in _GENERIC_TOURNAMENT_TOKENS
+            and tok not in _GENERIC_VENUE_TOKENS
+            and len(tok) >= 3
         }
         if (distinctive & text_tokens) or (tnorm and f" {tnorm} " in padded_text):
             named.add(key)

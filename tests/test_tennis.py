@@ -1450,6 +1450,42 @@ def test_named_tournaments_us_token_needs_the_phrase():
     assert named("US: ATP Winston-Salem: Shelton vs Fery") == {"421"}
 
 
+def test_named_tournaments_by_venue_city():
+    """#1178: "ATP 500 Tennis: Vienna - Day #4 (Centre Court)" names the Erste Bank Open
+    only through its venue ("Vienna, Austria"); without the city the gate deferred and the
+    Centre Court feed joined Centre Court at Basel and at the WTA Guangzhou Open. Court words
+    in a venue never name a tournament."""
+    from teamarr.consumers.matching.tennis_matcher import _named_tournaments, _tournament_guard
+    from teamarr.core.types import Venue
+
+    tz = ZoneInfo("Europe/Vienna")
+    day = datetime(2026, 10, 29, 12, tzinfo=tz)
+    vienna = _court_event("vie-1", "atp", "Centre Court", day)
+    vienna.tournament_name, vienna.tournament_id = "Erste Bank Open", "10"
+    vienna.venue = Venue(name="Vienna, Austria")
+    basel = _court_event("bas-1", "atp", "Center Court", day)
+    basel.tournament_name, basel.tournament_id = "Swiss Indoors Basel", "23"
+    basel.venue = Venue(name="Basel, Switzerland")
+    gz = _court_event("gz-1", "wta", "Centre Court", day)
+    gz.tournament_name, gz.tournament_id = "Guangzhou Open", "232"
+    gz.venue = Venue(name="Guangzhou, China PR")
+    usta = _court_event("uso-9", "atp", "Court 5", day)
+    usta.tournament_name, usta.tournament_id = "US Open", "189"
+    usta.venue = Venue(name="USTA Billie Jean King National Tennis Center")
+    pool = [vienna, basel, gz]
+
+    def named(text, p=pool):
+        return _named_tournaments(normalize_text(text), p)
+
+    feed = "TSN+ 02: ATP 500 Tennis: Vienna - Day #4 (Centre Court) @ 29 Oct 08:30 AM ET"
+    assert named(feed) == {"10"}
+    kept, vetoed = _tournament_guard(normalize_text(feed), pool)
+    assert [e.id for e in kept] == ["vie-1"] and sorted(e.id for e in vetoed) == ["bas-1", "gz-1"]
+    assert named("TSN+ 01: ATP 500 Tennis: Basel - Day #4 (Center Court)") == {"23"}
+    assert named("ATP Tennis: Day #4 (Centre Court)") == set()
+    assert named("TSN+ 05: Tennis - Center Court", [usta, basel]) == set()
+
+
 def test_us_prefixed_stream_is_not_vetoed_from_other_tournament():
     """End-to-end on the pair path: a US-region Winston-Salem stream must
     still bind to its Winston-Salem match while the US Open is in the pool."""
